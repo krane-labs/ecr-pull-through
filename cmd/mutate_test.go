@@ -67,7 +67,7 @@ func checkMutatePatch(t *testing.T, pod *corev1.Pod, want map[string]string) {
 		t.Fatalf("marshal pod: %v", err)
 	}
 	admReq := &v1beta1.AdmissionRequest{
-		UID: "test-uid",
+		UID:    "test-uid",
 		Object: runtime.RawExtension{Raw: podJSON},
 	}
 	admReview := &v1beta1.AdmissionReview{Request: admReq}
