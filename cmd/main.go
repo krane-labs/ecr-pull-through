@@ -144,7 +144,7 @@ func actuallyMutate(body []byte) ([]byte, error) {
 						"value": newImage,
 					}
 					p = append(p, patch)
-					log.Printf("Created patch for image %s on pod %s:%s, with %s", image, pod.Namespace, pod.ObjectMeta.GenerateName, newImage)
+					log.Printf("Created patch for image %s on ns/pod %s/%s, with %s", image, pod.Namespace, pod.ObjectMeta.GenerateName, newImage)
 					return true
 				}
 			}
@@ -160,7 +160,7 @@ func actuallyMutate(body []byte) ([]byte, error) {
 							"value": newImage,
 						}
 						p = append(p, patch)
-						log.Printf("Created patch for image %s on pod %s:%s, with %s", image, pod.Namespace, pod.ObjectMeta.GenerateName, newImage)
+						log.Printf("Created patch for image %s on ns/pod %s/%s, with %s", image, pod.Namespace, pod.ObjectMeta.GenerateName, newImage)
 						return true
 					}
 				}
@@ -197,7 +197,7 @@ func actuallyMutate(body []byte) ([]byte, error) {
 		if err != nil {
 			return nil, err // untested section
 		}
-		log.Printf("Successfully mutated pod %s:%s", pod.Namespace, pod.ObjectMeta.Name)
+		log.Printf("Successfully mutated pod %s/%s", pod.Namespace, pod.ObjectMeta.GenerateName)
 	}
 
 	return responseBody, nil
