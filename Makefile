@@ -10,6 +10,9 @@ help:
 build:
 	go build -o bin/mutation-webhook cmd/*.go
 
+linux:
+	CGO_ENABLED=0 GOARCH=amd64 GOOS=linux go build -o bin/mutation-webhook cmd/*.go
+
 # run: run the mutation-webhook binary
 run:
 	go run cmd/

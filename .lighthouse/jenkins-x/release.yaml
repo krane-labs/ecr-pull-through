@@ -11,7 +11,7 @@ spec:
       taskSpec:
         metadata: {}
         stepTemplate:
-          image: uses:jenkins-x/jx3-pipeline-catalog/tasks/helm/release.yaml@versionStream
+          image: uses:jenkins-x/jx3-pipeline-catalog/tasks/go/release.yaml@versionStream
           name: ""
           resources:
             # override limits for all containers here
@@ -28,7 +28,13 @@ spec:
             # override requests for the pod here
             requests:
               cpu: 400m
-              memory: 512Mi
+              memory: 600Mi
+        - name: build-make-build
+          resources: {}
+        - name: check-registry
+          resources: {}
+        - name: build-container-build
+          resources: {}
         - name: promote-changelog
           resources: {}
         - name: promote-helm-release
