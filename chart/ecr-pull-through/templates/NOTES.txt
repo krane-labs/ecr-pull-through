@@ -5,7 +5,7 @@ Your release is named {{ .Release.Name }} and has been deployed to namespace {{ 
 The ECR Pull-Through webhook is now configured to:
 1. Listen on port {{ .Values.service.port }}
 2. Use AWS Region: {{ .Values.awsRegion }}
-3. Use AWS Account ID: {{ .Values.awsAccountId }}
+3. Use AWS Account ID: {{ .Values.jxRequirements.cluster.region }}
 4. Handle images from the following registries:
 {{- range .Values.registries }}
    - {{ . }}

@@ -7,8 +7,8 @@ metadata:
     {{- include "ecr-pull-through.labels" . | nindent 4 }}
 data:
   registries.yaml: |
-    awsRegion: {{ required "AWS region is required" .Values.awsRegion }}
-    awsAccountId: {{ required "AWS account ID is required" .Values.awsAccountId }}
+    awsRegion: {{ required "AWS region is required" .Values.jxRequirements.cluster.region }}
+    awsAccountId: {{ required "AWS account ID is required" .Values.jxRequirements.cluster.project }}
     registries:
     {{- range .Values.registries }}
       - {{ . }}
