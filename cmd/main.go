@@ -46,15 +46,58 @@ func handleMutate(w http.ResponseWriter, r *http.Request) {
 	w.Write(mutated)
 }
 
-// Helper function to process Docker Hub official images
-func isDockerHubOfficialImage(image string) bool {
-	// Handle both "nginx" and "docker.io/nginx" format
-	if !strings.Contains(image, "/") {
-		return true
+// normalizeDockerHubImage detects Docker Hub images (explicit docker.io or implicit
+// owner/image and image) and returns a normalized name prefixed with
+// `docker.io/` (and `library/` where appropriate) while preserving tag or digest.
+// Examples:
+//   - "nginx" -> "docker.io/library/nginx"
+//   - "owner/image:tag" -> "docker.io/owner/image:tag"
+//   - "docker.io/nginx@sha256:..." -> "docker.io/library/nginx@sha256:..."
+//
+// If the image is not a docker hub image (explicit non-docker registry), ok=false.
+func normalizeDockerHubImage(image string) (normalized string, ok bool) {
+	// separate name and tag/digest
+	name := image
+	ref := ""
+	if idx := strings.Index(image, "@"); idx != -1 {
+		name = image[:idx]
+		ref = image[idx:]
+	} else {
+		lastColon := strings.LastIndex(image, ":")
+		lastSlash := strings.LastIndex(image, "/")
+		if lastColon > -1 && lastColon > lastSlash {
+			name = image[:lastColon]
+			ref = image[lastColon:]
+		}
 	}
-	// Handle "docker.io/library/nginx" or "docker.io/nginx" format
-	parts := strings.Split(image, "/")
-	return len(parts) <= 3 && parts[0] == "docker.io" && (len(parts) == 2 || parts[1] == "library")
+
+	parts := strings.Split(name, "/")
+	if len(parts) == 0 {
+		return "", false
+	}
+
+	// If first part looks like a registry (contains '.' or ':'), it's only
+	// Docker Hub if it's explicitly 'docker.io'. Otherwise it's another registry.
+	if strings.Contains(parts[0], ".") || strings.Contains(parts[0], ":") {
+		if parts[0] != "docker.io" {
+			return "", false
+		}
+		// docker.io/<name>
+		if len(parts) == 2 {
+			// docker.io/nginx -> docker.io/library/nginx
+			return "docker.io/library/" + parts[1] + ref, true
+		}
+		// docker.io/library/... or docker.io/owner/repo/...
+		return name + ref, true
+	}
+
+	// No registry specified -> docker hub implicit
+	if len(parts) == 1 {
+		// "nginx" -> docker.io/library/nginx
+		return "docker.io/library/" + parts[0] + ref, true
+	}
+	// "owner/image" or deeper -> docker.io/owner/image...
+	return "docker.io/" + name + ref, true
 }
 
 func actuallyMutate(body []byte) ([]byte, error) {
@@ -87,110 +130,55 @@ func actuallyMutate(body []byte) ([]byte, error) {
 		// the actual mutation is done by a string in JSONPatch style, i.e. we don't _actually_ modify the object, but
 		// tell K8S how it should modifiy it
 		p := []map[string]string{}
-		// Containers
-		for i, container := range pod.Spec.Containers {
-			imageReplaced := false
+
+		// helper to reduce repetition: check image against configured registries
+		// and docker hub normalization, append JSONPatch entry when needed.
+		addPatchForImage := func(i int, image string, pathFmt string) bool {
+			// explicit registry matches
 			for _, reg := range config.RegistryList() {
-				if strings.HasPrefix(container.Image, reg) {
-					newImage := fmt.Sprintf("%s.dkr.ecr.%s.amazonaws.com/%s", config.AwsAccountID, config.AwsRegion, container.Image)
+				if strings.HasPrefix(image, reg) {
+					newImage := fmt.Sprintf("%s.dkr.ecr.%s.amazonaws.com/%s", config.AwsAccountID, config.AwsRegion, image)
 					patch := map[string]string{
 						"op":    "replace",
-						"path":  fmt.Sprintf("/spec/containers/%d/image", i),
+						"path":  fmt.Sprintf(pathFmt, i),
 						"value": newImage,
 					}
 					p = append(p, patch)
-					imageReplaced = true
-					log.Printf("Created patch for container image %s on pod %s:%s, with %s", container.Image, pod.Namespace, pod.ObjectMeta.GenerateName, newImage)
-					break // Stop checking other registries if a match is found
+					log.Printf("Created patch for image %s on pod %s:%s, with %s", image, pod.Namespace, pod.ObjectMeta.GenerateName, newImage)
+					return true
 				}
 			}
 
-			// Check if image is a Docker Hub official image
-			if !imageReplaced && isDockerHubOfficialImage(container.Image) {
+			// implicit or explicit docker hub handling
+			if normalized, ok := normalizeDockerHubImage(image); ok {
 				for _, reg := range config.RegistryList() {
 					if reg == "docker.io" {
-						newImage := fmt.Sprintf("%s.dkr.ecr.%s.amazonaws.com/docker.io/library/%s", config.AwsAccountID, config.AwsRegion, container.Image)
+						newImage := fmt.Sprintf("%s.dkr.ecr.%s.amazonaws.com/%s", config.AwsAccountID, config.AwsRegion, normalized)
 						patch := map[string]string{
 							"op":    "replace",
-							"path":  fmt.Sprintf("/spec/containers/%d/image", i),
+							"path":  fmt.Sprintf(pathFmt, i),
 							"value": newImage,
 						}
 						p = append(p, patch)
-						log.Printf("Created patch for container image %s on pod %s:%s, with %s", container.Image, pod.Namespace, pod.ObjectMeta.GenerateName, newImage)
-						break
+						log.Printf("Created patch for image %s on pod %s:%s, with %s", image, pod.Namespace, pod.ObjectMeta.GenerateName, newImage)
+						return true
 					}
 				}
 			}
+
+			return false
+		}
+		// Containers
+		for i, container := range pod.Spec.Containers {
+			_ = addPatchForImage(i, container.Image, "/spec/containers/%d/image")
 		}
 		// InitContainers
 		for i, initcontainer := range pod.Spec.InitContainers {
-			imageReplaced := false
-			for _, reg := range config.RegistryList() {
-				if strings.HasPrefix(initcontainer.Image, reg) {
-					newImage := fmt.Sprintf("%s.dkr.ecr.%s.amazonaws.com/%s", config.AwsAccountID, config.AwsRegion, initcontainer.Image)
-					patch := map[string]string{
-						"op":    "replace",
-						"path":  fmt.Sprintf("/spec/initContainers/%d/image", i),
-						"value": newImage,
-					}
-					p = append(p, patch)
-					imageReplaced = true
-					log.Printf("Created patch for initcontainer image %s on pod %s:%s, with %s", initcontainer.Image, pod.Namespace, pod.ObjectMeta.GenerateName, newImage)
-					break // Stop checking other registries if a match is found
-				}
-			}
-
-			// Check if image is a Docker Hub official image
-			if !imageReplaced && isDockerHubOfficialImage(initcontainer.Image) {
-				for _, reg := range config.RegistryList() {
-					if reg == "docker.io" {
-						newImage := fmt.Sprintf("%s.dkr.ecr.%s.amazonaws.com/docker.io/library/%s", config.AwsAccountID, config.AwsRegion, initcontainer.Image)
-						patch := map[string]string{
-							"op":    "replace",
-							"path":  fmt.Sprintf("/spec/initContainers/%d/image", i),
-							"value": newImage,
-						}
-						p = append(p, patch)
-						log.Printf("Created patch for initcontainer image %s on pod %s:%s, with %s", initcontainer.Image, pod.Namespace, pod.ObjectMeta.GenerateName, newImage)
-						break
-					}
-				}
-			}
+			_ = addPatchForImage(i, initcontainer.Image, "/spec/initContainers/%d/image")
 		}
 		// EphemeralContainers
 		for i, ephemeralcontainer := range pod.Spec.EphemeralContainers {
-			imageReplaced := false
-			for _, reg := range config.RegistryList() {
-				if strings.HasPrefix(ephemeralcontainer.Image, reg) {
-					newImage := fmt.Sprintf("%s.dkr.ecr.%s.amazonaws.com/%s", config.AwsAccountID, config.AwsRegion, ephemeralcontainer.Image)
-					patch := map[string]string{
-						"op":    "replace",
-						"path":  fmt.Sprintf("/spec/ephemeralContainers/%d/image", i),
-						"value": newImage,
-					}
-					p = append(p, patch)
-					imageReplaced = true
-					log.Printf("Created patch for ephemeralcontainer image %s on pod %s:%s, with %s", ephemeralcontainer.Image, pod.Namespace, pod.ObjectMeta.GenerateName, newImage)
-					break // Stop checking other registries if a match is found
-				}
-			}
-
-			// Check if image is a Docker Hub official image
-			if !imageReplaced && isDockerHubOfficialImage(ephemeralcontainer.Image) {
-				for _, reg := range config.RegistryList() {
-					if reg == "docker.io" {
-						newImage := fmt.Sprintf("%s.dkr.ecr.%s.amazonaws.com/docker.io/library/%s", config.AwsAccountID, config.AwsRegion, ephemeralcontainer.Image)
-						patch := map[string]string{
-							"op":    "replace",
-							"path":  fmt.Sprintf("/spec/ephemeralContainers/%d/image", i),
-							"value": newImage,
-						}
-						p = append(p, patch)
-						log.Printf("Created patch for ephemeralcontainer image %s on pod %s:%s, with %s", ephemeralcontainer.Image, pod.Namespace, pod.ObjectMeta.GenerateName, newImage)
-						break
-					}
-				}
-			}
+			_ = addPatchForImage(i, ephemeralcontainer.Image, "/spec/ephemeralContainers/%d/image")
 		}
 
 		// parse the []map into JSON
