@@ -77,11 +77,14 @@ func normalizeDockerHubImage(image string) (normalized string, ok bool) {
 	}
 
 	// If first part looks like a registry (contains '.' or ':'), it's only
-	// Docker Hub if it's explicitly 'docker.io'. Otherwise it's another registry.
+	// Docker Hub if it's 'docker.io' or ends with '.docker.io'. Otherwise it's another registry.
 	if strings.Contains(parts[0], ".") || strings.Contains(parts[0], ":") {
-		if parts[0] != "docker.io" {
+		if parts[0] != "docker.io" && !strings.HasSuffix(parts[0], ".docker.io") {
 			return "", false
 		}
+		// Normalize to docker.io
+		parts[0] = "docker.io"
+		name = strings.Join(parts, "/")
 		// docker.io/<name>
 		if len(parts) == 2 {
 			// docker.io/nginx -> docker.io/library/nginx
