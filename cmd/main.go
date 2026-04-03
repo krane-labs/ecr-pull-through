@@ -77,11 +77,14 @@ func normalizeDockerHubImage(image string) (normalized string, ok bool) {
 	}
 
 	// If first part looks like a registry (contains '.' or ':'), it's only
-	// Docker Hub if it's explicitly 'docker.io'. Otherwise it's another registry.
+	// Docker Hub if it's 'docker.io' or ends with '.docker.io'. Otherwise it's another registry.
 	if strings.Contains(parts[0], ".") || strings.Contains(parts[0], ":") {
-		if parts[0] != "docker.io" {
+		if parts[0] != "docker.io" && !strings.HasSuffix(parts[0], ".docker.io") {
 			return "", false
 		}
+		// Normalize to docker.io
+		parts[0] = "docker.io"
+		name = strings.Join(parts, "/")
 		// docker.io/<name>
 		if len(parts) == 2 {
 			// docker.io/nginx -> docker.io/library/nginx
@@ -144,7 +147,7 @@ func actuallyMutate(body []byte) ([]byte, error) {
 						"value": newImage,
 					}
 					p = append(p, patch)
-					log.Printf("Created patch for image %s on pod %s:%s, with %s", image, pod.Namespace, pod.ObjectMeta.GenerateName, newImage)
+					log.Printf("Created patch for image %s on ns/pod %s/%s, with %s", image, pod.Namespace, pod.ObjectMeta.GenerateName, newImage)
 					return true
 				}
 			}
@@ -160,7 +163,7 @@ func actuallyMutate(body []byte) ([]byte, error) {
 							"value": newImage,
 						}
 						p = append(p, patch)
-						log.Printf("Created patch for image %s on pod %s:%s, with %s", image, pod.Namespace, pod.ObjectMeta.GenerateName, newImage)
+						log.Printf("Created patch for image %s on ns/pod %s/%s, with %s", image, pod.Namespace, pod.ObjectMeta.GenerateName, newImage)
 						return true
 					}
 				}
@@ -197,7 +200,7 @@ func actuallyMutate(body []byte) ([]byte, error) {
 		if err != nil {
 			return nil, err // untested section
 		}
-		log.Printf("Successfully mutated pod %s:%s", pod.Namespace, pod.ObjectMeta.Name)
+		log.Printf("Successfully mutated pod %s/%s", pod.Namespace, pod.ObjectMeta.GenerateName)
 	}
 
 	return responseBody, nil

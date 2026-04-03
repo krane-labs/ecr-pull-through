@@ -24,12 +24,16 @@ func TestActuallyMutate(t *testing.T) {
 				Containers: []corev1.Container{
 					{Name: "c-nginx", Image: "nginx"},
 					{Name: "c-ghcr", Image: "ghcr.io/owner/image:tag"},
+					{Name: "c-registry1", Image: "registry-1.docker.io/kranelabs/redis:8.6.1"},
+					{Name: "c-official", Image: "registry-1.docker.io/redis"},
 				},
 			},
 		}
 		checkMutatePatch(t, pod, map[string]string{
 			"/spec/containers/0/image": "12345.dkr.ecr.us-west-2.amazonaws.com/docker.io/library/nginx",
 			"/spec/containers/1/image": "12345.dkr.ecr.us-west-2.amazonaws.com/ghcr.io/owner/image:tag",
+			"/spec/containers/2/image": "12345.dkr.ecr.us-west-2.amazonaws.com/docker.io/kranelabs/redis:8.6.1",
+			"/spec/containers/3/image": "12345.dkr.ecr.us-west-2.amazonaws.com/docker.io/library/redis",
 		})
 	})
 
@@ -67,7 +71,7 @@ func checkMutatePatch(t *testing.T, pod *corev1.Pod, want map[string]string) {
 		t.Fatalf("marshal pod: %v", err)
 	}
 	admReq := &v1beta1.AdmissionRequest{
-		UID: "test-uid",
+		UID:    "test-uid",
 		Object: runtime.RawExtension{Raw: podJSON},
 	}
 	admReview := &v1beta1.AdmissionReview{Request: admReq}
